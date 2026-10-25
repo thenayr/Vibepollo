@@ -65,7 +65,9 @@ Each packed frame is cut into chunks. All fields are little-endian.
 | 12 | 1188 | Frame bytes; the last chunk is zero-padded |
 
 A receiver drops a frame that is missing any chunk, rejects chunks whose header is
-inconsistent, and marks the next complete frame as a discontinuity.
+inconsistent, and marks the next complete frame as a discontinuity. A skipped frame
+id is a lost frame too: a silent MAT frame fits in one chunk, so losing that chunk
+leaves no partial frame behind.
 
 ## Packed frames
 

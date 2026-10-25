@@ -105,6 +105,25 @@ TEST(AudioBitstreamProtocol, ReassemblesFramesAndDropsIncompleteOnes) {
   EXPECT_EQ(r.lost_frames(), 1u);
 }
 
+TEST(AudioBitstreamProtocol, AFrameLostWhollyIsStillCounted) {
+  // A silent MAT frame packs into one chunk; losing it leaves no partial frame
+  // behind, only a skipped frame id.
+  reassembler_t r;
+  std::vector<received> out;
+  auto emit = [&](std::span<const std::uint8_t> f, std::uint8_t flags) {
+    out.push_back({bytes(f.begin(), f.end()), flags});
+  };
+  for (const auto &chunk : chunks_of(pattern(100, 1), 0, 10)) r.push(chunk, emit);
+  // Frame 11 never arrives.
+  for (const auto &chunk : chunks_of(pattern(100, 2), 0, 12)) r.push(chunk, emit);
+  for (const auto &chunk : chunks_of(pattern(100, 3), 0, 13)) r.push(chunk, emit);
+
+  ASSERT_EQ(out.size(), 3u);
+  EXPECT_TRUE(out[1].flags & audio_bitstream::discontinuity);
+  EXPECT_FALSE(out[2].flags & audio_bitstream::discontinuity);
+  EXPECT_EQ(r.lost_frames(), 1u);
+}
+
 TEST(AudioBitstreamProtocol, FrameIdsWrap) {
   reassembler_t r;
   std::vector<received> out;

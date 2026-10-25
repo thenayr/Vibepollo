@@ -135,9 +135,16 @@ namespace audio_bitstream::protocol {
       if (!header) return false;
 
       if (!active_ || header->frame_id != frame_id_) {
-        if (active_ && !done_) {
-          ++lost_frames_;
-          pending_discontinuity_ = true;
+        if (active_) {
+          // The previous frame is lost if it never completed, and so is every
+          // frame whose id was skipped entirely (e.g. a one-chunk frame).
+          const auto skipped = std::uint16_t(header->frame_id - frame_id_ - 1);
+          // An id older than the last frame is out of order: don't splice it in.
+          const std::uint64_t lost = (done_ ? 0 : 1) + (skipped < 0x8000 ? skipped : 1);
+          if (lost) {
+            lost_frames_ += lost;
+            pending_discontinuity_ = true;
+          }
         }
         active_ = true;
         done_ = false;
