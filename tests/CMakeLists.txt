@@ -1027,6 +1027,9 @@ if(WIN32)
         LINK_LIBRARIES sunshine_test_displaydevice_headers)
     sunshine_register_component(NAME test_component_startup_encoder_probe_policy TEST_SOURCE unit/test_startup_encoder_probe_policy.cpp)
     sunshine_register_component(NAME test_component_audio_visibility_recovery TEST_SOURCE unit/test_audio_visibility_recovery.cpp)
+    # Skipped unless VIBEPOLLO_LIVE_TAP_SECONDS is set; needs the probe driver and elevation.
+    sunshine_register_component(NAME test_component_atmos_tap_live TEST_SOURCE unit/test_atmos_tap_live.cpp
+        PRODUCT_SOURCES "${SUNSHINE_TEST_REPOSITORY_ROOT}/src/platform/windows/atmos_tap_capture.cpp")
     sunshine_register_component(NAME test_component_display_helper_v2_async_dispatcher TEST_SOURCE unit/test_display_helper_v2_async_dispatcher.cpp
         PRODUCT_SOURCES
             "${SUNSHINE_TEST_REPOSITORY_ROOT}/src/platform/windows/display_helper_v2/diagnostics.cpp"
@@ -1182,6 +1185,8 @@ if(SUNSHINE_TEST_POWERSHELL)
 endif()
 
 sunshine_register_component(NAME test_component_audio_bitstream TEST_SOURCE unit/test_audio_bitstream.cpp)
+# The tap reader is platform-neutral; only opening the driver's section is Windows code.
+sunshine_register_component(NAME test_component_atmos_tap TEST_SOURCE unit/test_atmos_tap.cpp)
 sunshine_register_component(NAME test_component_dualsense_audio_pcm TEST_SOURCE unit/test_dualsense_audio_pcm.cpp)
 sunshine_register_component(NAME test_component_dualsense_launch_policy TEST_SOURCE unit/test_dualsense_launch_policy.cpp)
 set(_dualsense_protocol_test_adapter "")

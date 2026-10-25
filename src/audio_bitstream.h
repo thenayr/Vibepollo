@@ -34,6 +34,7 @@ namespace audio_bitstream {
 
   enum frame_flag : std::uint8_t {
     burst_aligned = 0x01,  // The frame starts at an IEC 61937 preamble.
+    discontinuity = 0x02,  // Not contiguous with the previous frame: a new stream, or bytes were lost.
   };
 
   struct frame_header {

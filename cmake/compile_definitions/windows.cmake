@@ -264,6 +264,9 @@ set(PLATFORM_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/platform/windows/present_timing.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/present_timing_policy.h"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/audio.cpp"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/atmos_tap.h"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/atmos_tap_capture.h"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/atmos_tap_capture.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/virtual_display.h"
         ${SUNSHINE_WINDOWS_VDISPLAY_SOURCES}
         "${CMAKE_SOURCE_DIR}/src/platform/windows/utils.h"
