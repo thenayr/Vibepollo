@@ -60,6 +60,10 @@ namespace audio_bitstream::protocol {
   /// so this spreads it over about 10 ms of the 20.
   constexpr std::chrono::microseconds PACKET_SPACING {1500};
 
+  /// How far the paced send schedule may run behind before it is reset. The
+  /// sender catches up on that much (back to back) after a late wake-up.
+  constexpr std::chrono::milliseconds PACING_MAX_BACKLOG {10};
+
   /**
    * Chunk header, little-endian:
    *   u8 version, u8 frame flags (audio_bitstream::frame_flag),

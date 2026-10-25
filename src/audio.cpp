@@ -319,6 +319,10 @@ namespace audio {
       auto packets = mail::man->queue<packet_t>(mail::audio_packets);
       bool sending = false;
       std::uint16_t frame_id = 0;
+      // raise() clears the whole queue when it is full, which here is only about
+      // five frames, so when the sender falls behind drop just the newest chunk.
+      std::uint64_t dropped_chunks = 0, dropped_since_log = 0;
+      auto last_drop_log = std::chrono::steady_clock::time_point {};
 
       // Callbacks run on the tap's thread; stop() joins it before these locals go away.
       tap::capture_t::callbacks_t callbacks;
@@ -339,10 +343,21 @@ namespace audio {
         const bool sent = wire::chunk_frame(frame.bytes, frame.flags, frame_id++, [&](std::span<const std::uint8_t, wire::CHUNK_BYTES> chunk) {
           buffer_t packet {wire::CHUNK_BYTES};
           std::copy(chunk.begin(), chunk.end(), std::begin(packet));
-          packets->raise(channel_data, std::move(packet));
+          if (!packets->try_raise(channel_data, std::move(packet))) {
+            ++dropped_chunks;
+            ++dropped_since_log;
+          }
         });
         if (!sent) {
           BOOST_LOG(warning) << "Dropped an oversized bitstream frame ("sv << frame.bytes.size() << " bytes)"sv;
+        }
+        if (dropped_since_log) {
+          const auto now = std::chrono::steady_clock::now();
+          if (now - last_drop_log >= 5s) {
+            BOOST_LOG(warning) << "Audio send queue full: dropped "sv << dropped_since_log << " bitstream chunks"sv;
+            dropped_since_log = 0;
+            last_drop_log = now;
+          }
         }
       };
       callbacks.stream_ended = [&]() {
@@ -355,6 +370,9 @@ namespace audio {
       capture->stop();
       if (const auto lost = capture->lost_bytes()) {
         BOOST_LOG(warning) << "Bitstream capture fell behind and lost "sv << lost << " bytes"sv;
+      }
+      if (dropped_chunks) {
+        BOOST_LOG(warning) << "Audio send queue was full; "sv << dropped_chunks << " bitstream chunks dropped in total"sv;
       }
     }
   }  // namespace

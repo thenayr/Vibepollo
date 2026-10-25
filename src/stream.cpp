@@ -2829,13 +2829,19 @@ namespace stream {
       BOOST_LOG(warning) << "No high-precision timer; audio bitstream packets won't be paced"sv;
       pacing_timer.reset();
     }
+    // Send times follow a schedule, not the last wake-up: when a sleep overruns
+    // (the timer oversleeps under heavy load), the packets behind it go out
+    // without waiting until the schedule is caught up, so the send rate never
+    // drops below one per PACKET_SPACING. At most PACING_MAX_BACKLOG is caught up
+    // that way, which bounds the burst after a long stall.
     std::chrono::steady_clock::time_point next_bitstream_send {};
     auto pace_bitstream_send = [&]() {
       const auto now = std::chrono::steady_clock::now();
+      next_bitstream_send = std::max(next_bitstream_send, now - audio_bitstream::protocol::PACING_MAX_BACKLOG);
       if (pacing_timer && next_bitstream_send > now) {
         pacing_timer->sleep_for(next_bitstream_send - now);
       }
-      next_bitstream_send = std::max(now, next_bitstream_send) + audio_bitstream::protocol::PACKET_SPACING;
+      next_bitstream_send += audio_bitstream::protocol::PACKET_SPACING;
     };
 
     // Audio traffic is sent on this thread
