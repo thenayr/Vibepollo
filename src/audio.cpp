@@ -11,6 +11,7 @@
 
 // local includes
 #include "audio.h"
+#include "audio_bitstream_protocol.h"
 #include "audio_lifecycle_policy.h"
 #include "audio_lifecycle_state.h"
 #include "audio_policy.h"
@@ -22,6 +23,10 @@
 #include "thread_safe.h"
 #include "utility.h"
 #include "webrtc_stream.h"
+
+#ifdef _WIN32
+  #include "platform/windows/atmos_tap_capture.h"
+#endif
 
 namespace audio {
   using namespace std::literals;
@@ -227,6 +232,112 @@ namespace audio {
     }
   }
 
+  std::uint32_t bitstream_formats_available() {
+#ifdef _WIN32
+    std::string error;
+    if (platf::audio::atmos_tap::capture_t::open(error)) {
+      return audio_bitstream::protocol::FORMAT_IEC61937;
+    }
+#endif
+    return 0;
+  }
+
+#ifdef _WIN32
+  namespace {
+    // The endpoint the Vibepollo Atmos probe driver registers. Not a virtual-*
+    // sink name, so set_sink makes it the default without touching its format.
+    constexpr auto bitstream_sink = "Vibepollo Atmos Probe"sv;
+
+    const char *encoding_name(platf::audio::atmos_tap::encoding_e encoding) {
+      using enum platf::audio::atmos_tap::encoding_e;
+      switch (encoding) {
+        case pcm: return "PCM";
+        case ieee_float: return "float PCM";
+        case ac3: return "Dolby Digital";
+        case dolby_digital_plus: return "Dolby Digital Plus";
+        case dolby_digital_plus_atmos: return "Dolby Digital Plus with Atmos";
+        case mlp: return "Dolby TrueHD";
+        case mat20: return "Dolby MAT 2.0";
+        case mat21: return "Dolby MAT 2.1";
+        case iec61937_other: return "IEC 61937";
+        default: return "unknown";
+      }
+    }
+
+    /**
+     * @brief Sends the probe tap's IEC 61937 frames instead of Opus until shutdown.
+     *
+     * Each packed frame is cut into fixed-size chunks (audio_bitstream_protocol.h),
+     * which the audio broadcast thread sends like Opus packets. PCM reaching the
+     * probe isn't sent: Dolby Atmos for home theater must be on for that endpoint.
+     */
+    void capture_bitstream(safe::mail_t &mail, audio_ctx_t &ctx, void *channel_data) {
+      namespace tap = platf::audio::atmos_tap;
+      namespace wire = audio_bitstream::protocol;
+      auto shutdown_event = mail->event<bool>(mail::shutdown);
+
+      // Not named error/info: those are the BOOST_LOG loggers.
+      std::string open_error;
+      auto capture = tap::capture_t::open(open_error);
+      if (!capture) {
+        BOOST_LOG(error) << "Audio bitstream passthrough unavailable: "sv << open_error << ". The stream will not have audio."sv;
+        shutdown_event->view();
+        return;
+      }
+
+      // Only the first session may change the default sink, as for Opus capture.
+      if (!ctx.sink_flag->exchange(true, std::memory_order_acquire)) {
+        ctx.restore_sink = ctx.sink.host != bitstream_sink;
+        if (ctx.restore_sink && ctx.control->set_sink(std::string {bitstream_sink})) {
+          BOOST_LOG(warning) << "Couldn't make "sv << bitstream_sink << " the default output; only audio sent to it reaches the client"sv;
+          ctx.restore_sink = false;
+        }
+      }
+
+      auto packets = mail::man->queue<packet_t>(mail::audio_packets);
+      bool sending = false;
+      std::uint16_t frame_id = 0;
+
+      // Callbacks run on the tap's thread; stop() joins it before these locals go away.
+      tap::capture_t::callbacks_t callbacks;
+      callbacks.stream_started = [&](const tap::stream_info_t &stream) {
+        sending = stream.format.bitstream();
+        BOOST_LOG(info) << "Bitstream capture: "sv << encoding_name(stream.format.encoding) << ", "sv
+                        << stream.format.channels << " ch, "sv << stream.format.sample_rate << " Hz"sv
+                        << (stream.from_start ? ""sv : " (joined mid-stream)"sv);
+        if (!sending) {
+          BOOST_LOG(warning) << "The Atmos probe is receiving PCM, not a bitstream, so no audio is sent. "sv
+                             << "Turn on Dolby Atmos for home theater for it in Dolby Access."sv;
+        }
+      };
+      callbacks.frame = [&](tap::packed_frame_t &&frame) {
+        if (!sending) {
+          return;
+        }
+        const bool sent = wire::chunk_frame(frame.bytes, frame.flags, frame_id++, [&](std::span<const std::uint8_t, wire::CHUNK_BYTES> chunk) {
+          buffer_t packet {wire::CHUNK_BYTES};
+          std::copy(chunk.begin(), chunk.end(), std::begin(packet));
+          packets->raise(channel_data, std::move(packet));
+        });
+        if (!sent) {
+          BOOST_LOG(warning) << "Dropped an oversized bitstream frame ("sv << frame.bytes.size() << " bytes)"sv;
+        }
+      };
+      callbacks.stream_ended = [&]() {
+        BOOST_LOG(info) << "Bitstream capture: stream ended"sv;
+      };
+
+      capture->start(std::move(callbacks));
+      BOOST_LOG(info) << "Audio bitstream passthrough started"sv;
+      shutdown_event->view();
+      capture->stop();
+      if (const auto lost = capture->lost_bytes()) {
+        BOOST_LOG(warning) << "Bitstream capture fell behind and lost "sv << lost << " bytes"sv;
+      }
+    }
+  }  // namespace
+#endif
+
   void capture(safe::mail_t mail, config_t config, void *channel_data) {
     auto shutdown_event = mail->event<bool>(mail::shutdown);
     if (!config::audio.stream || config.input_only) {
@@ -261,6 +372,15 @@ namespace audio {
     if (!control) {
       return;
     }
+
+#ifdef _WIN32
+    // Negotiated in RTSP ANNOUNCE only when this host can capture a bitstream.
+    if (config.flags[config_t::BITSTREAM_PASSTHROUGH]) {
+      init_failure_fg.disable();
+      capture_bitstream(mail, *ref.get(), channel_data);
+      return;
+    }
+#endif
 
     // Order of priority:
     // 1. Virtual sink

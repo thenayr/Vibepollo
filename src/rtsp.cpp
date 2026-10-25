@@ -33,6 +33,7 @@ extern "C" {
 #endif
 
 // local includes
+#include "audio_bitstream_protocol.h"
 #include "config.h"
 #include "globals.h"
 #include "input.h"
@@ -1988,6 +1989,11 @@ namespace rtsp_stream {
       ss << pyrowave::protocol::DESCRIBE_BITSTREAM_ATTRIBUTE << pyrowave::protocol::BITSTREAM_ID << std::endl;
     }
 
+    // Audio bitstream passthrough capability (docs/audio-bitstream-protocol.md).
+    if (const auto formats = audio::bitstream_formats_available()) {
+      ss << audio_bitstream::protocol::DESCRIBE_FORMATS << formats << std::endl;
+    }
+
     if (!session->surround_params.empty()) {
       // If we have our own surround parameters, advertise them twice first
       ss << "a=fmtp:97 surround-params="sv << session->surround_params << std::endl;
@@ -2314,6 +2320,22 @@ namespace rtsp_stream {
     config.audio.input_only =
       session->input_only || session->role == remote_session::role_e::input;
 
+    // Audio bitstream passthrough (docs/audio-bitstream-protocol.md): only when the
+    // client lists a format this host can capture right now.
+    if (const auto it = args.find(audio_bitstream::protocol::ANNOUNCE_FORMATS); it != args.end() && !config.audio.input_only) {
+      const auto requested = (std::uint32_t) util::from_view(it->second);
+      const auto agreed = requested & audio::bitstream_formats_available();
+      if (!(agreed & audio_bitstream::protocol::FORMAT_IEC61937)) {
+        BOOST_LOG(info) << "Client supports audio bitstream passthrough, but this host can't capture one; using Opus"sv;
+      } else if (session->host_audio) {
+        // Passthrough routes system audio to the silent probe endpoint.
+        BOOST_LOG(info) << "Client asked for audio bitstream passthrough, but host audio is on; using Opus"sv;
+      } else {
+        BOOST_LOG(info) << "Audio: bitstream passthrough (IEC 61937 from the Atmos probe)"sv;
+        config.audio.flags[audio::config_t::BITSTREAM_PASSTHROUGH] = true;
+      }
+    }
+
     if (config.monitor.vrr_low_latency) {
       BOOST_LOG(info) << "Client requested VRR low-latency stream policy";
     }
@@ -2432,6 +2454,9 @@ namespace rtsp_stream {
       // Adjust the bitrate to account for audio traffic bandwidth usage (capped at 20% reduction).
       // The bitrate per channel is 256 Kbps for high quality mode and 96 Kbps for normal quality.
       auto audioBitrateAdjustment = (config.audio.flags[audio::config_t::HIGH_QUALITY] ? 256 : 96) * config.audio.channels;
+      if (config.audio.flags[audio::config_t::BITSTREAM_PASSTHROUGH]) {
+        audioBitrateAdjustment = audio_bitstream::protocol::BITRATE_BUDGET_KBPS;
+      }
       // Audio adds two parity packets for every four data packets. Include
       // that fixed 50% FEC cost inside PyroWave's total wire budget too.
       if (pyrowave_session) audioBitrateAdjustment = (audioBitrateAdjustment * 3 + 1) / 2;

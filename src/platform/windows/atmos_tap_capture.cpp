@@ -5,7 +5,10 @@
 #include "atmos_tap_capture.h"
 
 #include <atomic>
+#include <memory>
+#include <string>
 #include <thread>
+#include <type_traits>
 
 #include <windows.h>
 

@@ -1185,6 +1185,7 @@ if(SUNSHINE_TEST_POWERSHELL)
 endif()
 
 sunshine_register_component(NAME test_component_audio_bitstream TEST_SOURCE unit/test_audio_bitstream.cpp)
+sunshine_register_component(NAME test_component_audio_bitstream_protocol TEST_SOURCE unit/test_audio_bitstream_protocol.cpp)
 # The tap reader is platform-neutral; only opening the driver's section is Windows code.
 sunshine_register_component(NAME test_component_atmos_tap TEST_SOURCE unit/test_atmos_tap.cpp)
 sunshine_register_component(NAME test_component_dualsense_audio_pcm TEST_SOURCE unit/test_dualsense_audio_pcm.cpp)

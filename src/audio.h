@@ -46,6 +46,7 @@ namespace audio {
       HOST_AUDIO,  ///< Host audio
       CUSTOM_SURROUND_PARAMS,  ///< Custom surround parameters
       CONTINUOUS_AUDIO,  ///< Continuous audio
+      BITSTREAM_PASSTHROUGH,  ///< Send the Atmos probe's IEC 61937 bitstream instead of Opus
       MAX_FLAGS  ///< Maximum number of flags
     };
 
@@ -80,6 +81,12 @@ namespace audio {
   using audio_ctx_ref_t = safe::shared_t<audio_ctx_t>::ptr_t;
 
   void capture(safe::mail_t mail, config_t config, void *channel_data);
+
+  /**
+   * @brief Bitstream formats (audio_bitstream::protocol::FORMAT_*) this host can capture now.
+   * @note Nonzero only on Windows with the Vibepollo Atmos probe driver loaded.
+   */
+  std::uint32_t bitstream_formats_available();
 
   /**
    * @brief Get the reference to the audio context.

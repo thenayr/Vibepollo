@@ -38,6 +38,7 @@ extern "C" {
 }
 
 // local includes
+#include "audio_bitstream_protocol.h"
 #include "config.h"
 #include "crypto.h"
 #include "deferred_stream_start_policy.h"
@@ -2850,6 +2851,10 @@ namespace stream {
 
       BOOST_LOG(verbose) << "Audio [seq "sv << sequenceNumber << ", pts "sv << timestamp << "] ::  send..."sv;
 
+      // Sessions differ: Opus is 97, bitstream passthrough chunks have their own type.
+      audio_packet.rtp.packetType = session->config.audio.flags[audio::config_t::BITSTREAM_PASSTHROUGH] ?
+                                      audio_bitstream::protocol::RTP_PAYLOAD_TYPE :
+                                      97;
       audio_packet.rtp.sequenceNumber = util::endian::big(sequenceNumber);
       audio_packet.rtp.timestamp = util::endian::big(timestamp);
 
@@ -4090,7 +4095,9 @@ namespace stream {
         session->audio.fec_packet.rtp.packetType = 127;
         session->audio.fec_packet.rtp.timestamp = 0;
         session->audio.fec_packet.rtp.ssrc = 0;
-        session->audio.fec_packet.fecHeader.payloadType = 97;
+        session->audio.fec_packet.fecHeader.payloadType = config.audio.flags[audio::config_t::BITSTREAM_PASSTHROUGH] ?
+                                                            audio_bitstream::protocol::RTP_PAYLOAD_TYPE :
+                                                            97;
         session->audio.fec_packet.fecHeader.ssrc = 0;
         session->audio.cipher = crypto::cipher::cbc_t {launch_session.gcm_key, true};
         session->audio.ping_payload = launch_session.av_ping_payload;
