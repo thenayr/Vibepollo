@@ -19,7 +19,7 @@ Host-side constants are in `src/audio_bitstream_protocol.h`; the frame format is
 
 | Direction | Attribute | Meaning |
 |---|---|---|
-| Host, RTSP DESCRIBE | `a=x-ss-audio.bitstreamFormats:<mask>` | Formats the host can capture now. Sent only when the probe's tap is open. |
+| Host, RTSP DESCRIBE | `a=x-ss-audio.bitstreamFormats:<mask>` | Formats the host can capture. Sent when the probe's tap is open, or when the probe endpoint is active but nothing has played to it yet (the driver creates the tap on the first stream). |
 | Client, RTSP ANNOUNCE | `x-ss-audio.bitstreamFormats:<mask>` | Formats the client can play. |
 
 | Format bit | Name | Meaning |
@@ -33,8 +33,9 @@ usual surround attributes so the Opus fallback works.
 
 When passthrough is on, the host makes the probe the default output for the session
 and restores the previous default afterwards, as it does for its virtual sink. It
-doesn't change the probe's format. It reserves 3000 kbit/s of the video bitrate for
-audio instead of the Opus estimate.
+doesn't change the probe's format. If the tap doesn't exist yet, it retries every
+250 ms until audio reaches the probe or the session ends. It reserves 3000 kbit/s
+of the video bitrate for audio instead of the Opus estimate.
 
 ## RTP
 

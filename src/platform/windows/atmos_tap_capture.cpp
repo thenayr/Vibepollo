@@ -11,11 +11,28 @@
 #include <type_traits>
 
 #include <windows.h>
+#include <mmdeviceapi.h>
+#include <propidl.h>
 
 namespace platf::audio::atmos_tap {
   namespace {
     // MAT bursts are 20 ms; polling every 2 ms keeps added latency well below one burst.
     constexpr LONGLONG poll_interval_100ns = 2 * 10000;
+
+    // The endpoint properties audio_control_t::find_device_id matches a sink
+    // name against: PKEY_Device_FriendlyName, PKEY_Device_DeviceDesc and
+    // PKEY_DeviceInterface_FriendlyName. Local copies, since audio.cpp defines
+    // the shared ones.
+    constexpr PROPERTYKEY endpoint_name_keys[] = {
+      {{0xa45c254e, 0xdf1c, 0x4efd, {0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}}, 14},
+      {{0xa45c254e, 0xdf1c, 0x4efd, {0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}}, 2},
+      {{0x026e516e, 0xb814, 0x414b, {0x83, 0xcd, 0x85, 0x6d, 0x6f, 0xef, 0x48, 0x22}}, 2},
+    };
+
+    // CLSID_MMDeviceEnumerator and IID_IMMDeviceEnumerator, also local so this
+    // file links on its own (the tests build it without audio.cpp).
+    constexpr CLSID mm_device_enumerator_clsid = {0xbcde0395, 0xe52f, 0x467c, {0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e}};
+    constexpr IID mm_device_enumerator_iid = {0xa95664d2, 0x9614, 0x4f35, {0xa7, 0x46, 0xde, 0x8d, 0xb6, 0x36, 0x17, 0xe6}};
 
     struct handle_closer {
       void operator()(HANDLE h) const {
@@ -23,6 +40,24 @@ namespace platf::audio::atmos_tap {
       }
     };
     using unique_handle = std::unique_ptr<std::remove_pointer_t<HANDLE>, handle_closer>;
+
+    struct com_releaser {
+      void operator()(IUnknown *p) const {
+        if (p) p->Release();
+      }
+    };
+    template<class T>
+    using com_ptr = std::unique_ptr<T, com_releaser>;
+
+    // endpoint_name is ASCII, so a per-character compare is exact.
+    bool is_endpoint_name(const wchar_t *value) {
+      if (!value) return false;
+      std::size_t i = 0;
+      for (; i < endpoint_name.size(); ++i) {
+        if (value[i] != static_cast<wchar_t>(endpoint_name[i])) return false;
+      }
+      return value[i] == L'\0';
+    }
 
     struct view_unmapper {
       void operator()(const void *p) const {
@@ -34,7 +69,7 @@ namespace platf::audio::atmos_tap {
     std::string describe(DWORD error) {
       switch (error) {
         case ERROR_FILE_NOT_FOUND:
-          return "the Atmos probe driver isn't loaded (no tap section)";
+          return "no tap section: the Atmos probe driver isn't loaded, or nothing has played to it yet";
         case ERROR_ACCESS_DENIED:
           return "access denied: the tap is readable only by Administrators and SYSTEM";
         default:
@@ -92,11 +127,55 @@ namespace platf::audio::atmos_tap {
     }
   };
 
-  std::unique_ptr<capture_t> capture_t::open(std::string &error) {
+  bool endpoint_present() {
+    // Called from RTSP threads, which may not have COM set up. RPC_E_CHANGED_MODE
+    // means it already is, in another apartment type, which works as is.
+    const HRESULT init = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool uninit = SUCCEEDED(init);
+
+    bool found = false;
+    IMMDeviceEnumerator *raw_enumerator = nullptr;
+    if (SUCCEEDED(CoCreateInstance(mm_device_enumerator_clsid, nullptr, CLSCTX_ALL, mm_device_enumerator_iid, reinterpret_cast<void **>(&raw_enumerator)))) {
+      com_ptr<IMMDeviceEnumerator> enumerator {raw_enumerator};
+      IMMDeviceCollection *raw_collection = nullptr;
+      if (SUCCEEDED(enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &raw_collection))) {
+        com_ptr<IMMDeviceCollection> collection {raw_collection};
+        UINT count = 0;
+        collection->GetCount(&count);
+        for (UINT i = 0; i < count && !found; ++i) {
+          IMMDevice *raw_device = nullptr;
+          if (FAILED(collection->Item(i, &raw_device))) continue;
+          com_ptr<IMMDevice> device {raw_device};
+
+          IPropertyStore *raw_props = nullptr;
+          if (FAILED(device->OpenPropertyStore(STGM_READ, &raw_props))) continue;
+          com_ptr<IPropertyStore> props {raw_props};
+
+          for (const auto &key : endpoint_name_keys) {
+            PROPVARIANT value;
+            PropVariantInit(&value);
+            if (SUCCEEDED(props->GetValue(key, &value)) && value.vt == VT_LPWSTR && is_endpoint_name(value.pwszVal)) {
+              found = true;
+            }
+            PropVariantClear(&value);
+            if (found) break;
+          }
+        }
+      }
+    }
+
+    if (uninit) CoUninitialize();
+    return found;
+  }
+
+  std::unique_ptr<capture_t> capture_t::open(std::string &error, bool *not_created) {
+    if (not_created) *not_created = false;
     auto impl = std::make_unique<impl_t>();
     impl->mapping.reset(OpenFileMappingW(FILE_MAP_READ, FALSE, section_name));
     if (!impl->mapping) {
-      error = describe(GetLastError());
+      const DWORD code = GetLastError();
+      if (not_created) *not_created = code == ERROR_FILE_NOT_FOUND;
+      error = describe(code);
       return nullptr;
     }
 

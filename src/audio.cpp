@@ -234,8 +234,13 @@ namespace audio {
 
   std::uint32_t bitstream_formats_available() {
 #ifdef _WIN32
+    namespace tap = platf::audio::atmos_tap;
     std::string error;
-    if (platf::audio::atmos_tap::capture_t::open(error)) {
+    bool not_created = false;
+    // The driver creates the tap when the first stream plays to the probe, and
+    // capture only routes audio there after negotiation, so a present endpoint
+    // is enough. capture_bitstream waits for the tap.
+    if (tap::capture_t::open(error, &not_created) || (not_created && tap::endpoint_present())) {
       return audio_bitstream::protocol::FORMAT_IEC61937;
     }
 #endif
@@ -246,7 +251,10 @@ namespace audio {
   namespace {
     // The endpoint the Vibepollo Atmos probe driver registers. Not a virtual-*
     // sink name, so set_sink makes it the default without touching its format.
-    constexpr auto bitstream_sink = "Vibepollo Atmos Probe"sv;
+    constexpr auto bitstream_sink = platf::audio::atmos_tap::endpoint_name;
+
+    // How often capture_bitstream retries opening a tap that doesn't exist yet.
+    constexpr auto tap_retry_interval = 250ms;
 
     const char *encoding_name(platf::audio::atmos_tap::encoding_e encoding) {
       using enum platf::audio::atmos_tap::encoding_e;
@@ -276,22 +284,36 @@ namespace audio {
       namespace wire = audio_bitstream::protocol;
       auto shutdown_event = mail->event<bool>(mail::shutdown);
 
-      // Not named error/info: those are the BOOST_LOG loggers.
-      std::string open_error;
-      auto capture = tap::capture_t::open(open_error);
-      if (!capture) {
-        BOOST_LOG(error) << "Audio bitstream passthrough unavailable: "sv << open_error << ". The stream will not have audio."sv;
-        shutdown_event->view();
-        return;
-      }
-
       // Only the first session may change the default sink, as for Opus capture.
+      // Done before opening the tap: the driver creates it when audio first
+      // plays to the probe, which routing system audio there brings about.
       if (!ctx.sink_flag->exchange(true, std::memory_order_acquire)) {
         ctx.restore_sink = ctx.sink.host != bitstream_sink;
         if (ctx.restore_sink && ctx.control->set_sink(std::string {bitstream_sink})) {
           BOOST_LOG(warning) << "Couldn't make "sv << bitstream_sink << " the default output; only audio sent to it reaches the client"sv;
           ctx.restore_sink = false;
         }
+      }
+
+      // Not named error/info: those are the BOOST_LOG loggers.
+      std::string open_error;
+      bool not_created = false;
+      bool waiting_logged = false;
+      auto capture = tap::capture_t::open(open_error, &not_created);
+      while (!capture && not_created) {
+        if (!waiting_logged) {
+          BOOST_LOG(info) << "Waiting for audio to play to "sv << bitstream_sink << " before bitstream capture can start"sv;
+          waiting_logged = true;
+        }
+        if (shutdown_event->view(tap_retry_interval)) {
+          return;
+        }
+        capture = tap::capture_t::open(open_error, &not_created);
+      }
+      if (!capture) {
+        BOOST_LOG(error) << "Audio bitstream passthrough unavailable: "sv << open_error << ". The stream will not have audio."sv;
+        shutdown_event->view();
+        return;
       }
 
       auto packets = mail::man->queue<packet_t>(mail::audio_packets);

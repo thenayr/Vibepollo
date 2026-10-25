@@ -4,6 +4,8 @@
  *        an elevated prompt, and audio playing to the probe endpoint.
  *
  * Set VIBEPOLLO_LIVE_TAP_SECONDS to how long to capture; skipped otherwise.
+ * The endpoint test runs when VIBEPOLLO_LIVE_TAP_ENDPOINT is set, and needs
+ * only the probe driver installed.
  */
 #include "src/platform/windows/atmos_tap_capture.h"
 
@@ -15,6 +17,14 @@
 #include <thread>
 
 using namespace platf::audio::atmos_tap;
+
+TEST(AtmosTapLive, FindsTheProbeEndpoint) {
+  const char *enabled = std::getenv("VIBEPOLLO_LIVE_TAP_ENDPOINT");
+  if (!enabled || !*enabled) {
+    GTEST_SKIP() << "VIBEPOLLO_LIVE_TAP_ENDPOINT is not set";
+  }
+  EXPECT_TRUE(endpoint_present()) << "No active render endpoint named " << endpoint_name;
+}
 
 TEST(AtmosTapLive, CapturesContiguousMatFramesFromTheDriver) {
   const char *seconds_text = std::getenv("VIBEPOLLO_LIVE_TAP_SECONDS");

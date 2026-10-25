@@ -9,8 +9,20 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 
 namespace platf::audio::atmos_tap {
+  /** @brief Name of the render endpoint the probe driver registers. */
+  inline constexpr std::string_view endpoint_name = "Vibepollo Atmos Probe";
+
+  /**
+   * @brief Whether the probe's render endpoint is active.
+   *
+   * The driver creates the tap only once a stream plays to the probe, so this
+   * is how to tell the probe is installed before anything has played to it.
+   */
+  bool endpoint_present();
+
   /**
    * @brief Captures packed IEC 61937 frames from the probe tap until stopped.
    *
@@ -28,11 +40,14 @@ namespace platf::audio::atmos_tap {
     /**
      * @brief Map the tap read-only.
      * @param error Set to a readable reason when the tap can't be opened.
+     * @param not_created Optional; set to true when the tap doesn't exist yet,
+     *        which is also the case while the driver is loaded but nothing has
+     *        played to the probe. Worth retrying then.
      * @return The capture, not yet started, or nullptr.
      *
      * Needs Administrator or SYSTEM: the driver grants nothing else access.
      */
-    static std::unique_ptr<capture_t> open(std::string &error);
+    static std::unique_ptr<capture_t> open(std::string &error, bool *not_created = nullptr);
 
     ~capture_t();
     capture_t(const capture_t &) = delete;
