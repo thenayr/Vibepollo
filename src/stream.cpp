@@ -2822,8 +2822,9 @@ namespace stream {
     audio_packet.rtp.ssrc = 0;
 
     // Bitstream passthrough queues each frame's chunks at once. Space those
-    // packets and their parity out (audio_bitstream::protocol::PACKET_SPACING) so
-    // one collision with a video burst can't take a whole FEC block with it.
+    // packets and their parity out so one collision with a video burst can't
+    // take a whole FEC block with it: each frame's packets are spread over
+    // PACING_WINDOW, at audio_bitstream::protocol::packet_spacing() for its size.
     auto pacing_timer = platf::create_high_precision_timer();
     if (!pacing_timer || !*pacing_timer) {
       BOOST_LOG(warning) << "No high-precision timer; audio bitstream packets won't be paced"sv;
@@ -2832,21 +2833,22 @@ namespace stream {
     // Send times follow a schedule, not the last wake-up: when a sleep overruns
     // (the timer oversleeps under heavy load), the packets behind it go out
     // without waiting until the schedule is caught up, so the send rate never
-    // drops below one per PACKET_SPACING. At most PACING_MAX_BACKLOG is caught up
+    // drops below one per spacing. At most PACING_MAX_BACKLOG is caught up
     // that way, which bounds the burst after a long stall.
     std::chrono::steady_clock::time_point next_bitstream_send {};
+    auto bitstream_spacing = audio_bitstream::protocol::MIN_PACKET_SPACING;
     auto pace_bitstream_send = [&]() {
       const auto now = std::chrono::steady_clock::now();
       next_bitstream_send = std::max(next_bitstream_send, now - audio_bitstream::protocol::PACING_MAX_BACKLOG);
       if (pacing_timer && next_bitstream_send > now) {
         pacing_timer->sleep_for(next_bitstream_send - now);
       }
-      next_bitstream_send += audio_bitstream::protocol::PACKET_SPACING;
+      next_bitstream_send += bitstream_spacing;
     };
 
     // Audio traffic is sent on this thread
     platf::set_thread_name("stream::audioBroadcast");
-    // Bitstream passthrough needs ~315 paced sends a second; a game saturating
+    // Bitstream passthrough needs up to ~900 paced sends a second; a game saturating
     // the CPU delayed this thread's wake-ups by tens of milliseconds at "high".
     platf::adjust_thread_priority(platf::thread_priority_e::realtime_audio);
 
@@ -2879,6 +2881,13 @@ namespace stream {
       // Sessions differ: Opus is 97, bitstream passthrough chunks have their own type.
       const bool bitstream = session->config.audio.flags[audio::config_t::BITSTREAM_PASSTHROUGH];
       audio_packet.rtp.packetType = bitstream ? audio_bitstream::protocol::RTP_PAYLOAD_TYPE : 97;
+      if (bitstream) {
+        // Pace by this chunk's frame size; its header is still in the clear here.
+        const std::span<const std::uint8_t> chunk {std::begin(packet_data), packet_data.size()};
+        if (const auto header = audio_bitstream::protocol::parse_chunk(chunk)) {
+          bitstream_spacing = audio_bitstream::protocol::packet_spacing(header->count);
+        }
+      }
       audio_packet.rtp.sequenceNumber = util::endian::big(sequenceNumber);
       audio_packet.rtp.timestamp = util::endian::big(timestamp);
 

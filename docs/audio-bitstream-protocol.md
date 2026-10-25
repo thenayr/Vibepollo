@@ -46,10 +46,11 @@ Passthrough uses the normal audio socket, encryption (`SS_ENC_AUDIO`, AES-CBC) a
   FEC packets keep type 127 with `100` in their FEC header's payload type.
 - Every payload is exactly **1200 bytes** before encryption (`CHUNK_BYTES`), so FEC
   shards are equal-sized. With RTP and AES-CBC padding a datagram is 1228 bytes.
-- The host sends passthrough packets, parity included, at least 0.4 ms apart
-  (`PACKET_SPACING`). Sent back to back, a frame's chunks and their parity
-  tend to be lost together when they meet a video burst, leaving FEC nothing to
-  recover from.
+- The host paces passthrough packets, parity included: each frame's packets are
+  spread evenly over 15 ms (`PACING_WINDOW`), 0.4-2.5 ms apart depending on the
+  frame's size (`packet_spacing()`). Sent back to back, a frame's chunks and
+  their parity tend to be lost together when they meet a video burst, leaving FEC
+  nothing to recover from.
 - RTP timestamps advance by the negotiated packet duration per packet, as for Opus.
   They carry no timing for passthrough.
 - The host sends nothing while the probe has no stream, or while it receives PCM

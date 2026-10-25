@@ -54,13 +54,19 @@ namespace audio_bitstream::protocol {
   /// in Atmos (~12 chunks per frame, ~900 packets per second with parity).
   constexpr int BITRATE_BUDGET_KBPS = 6000;
 
-  /// Least time between two passthrough packets (data or FEC parity) on the wire.
-  /// A frame's chunks and the block's parity would otherwise leave back to back,
-  /// and a burst that collides with video loses its tail together with the parity
-  /// meant to repair it. The cap this sets, 2,500 packets per second, is enough
-  /// for ~16 Mbit/s of packed MAT; a game frame spreads over about 7 ms of its 20.
-  /// (1.5 ms capped the sender below what a game needs and overflowed its queue.)
-  constexpr std::chrono::microseconds PACKET_SPACING {400};
+  /// Passthrough packets (data and FEC parity) are paced on the wire. Sent back
+  /// to back, a frame's chunks and the block's parity are lost together when they
+  /// meet a video burst, leaving FEC nothing to repair them with. So each frame's
+  /// packets are spread evenly over PACING_WINDOW (of a 20 ms MAT frame), as far
+  /// apart as the frame's size allows: ~1.9 ms for sparse audio (YouTube, ~5
+  /// chunks), ~0.75 ms for a game in Atmos (~13 chunks). A fixed 1.5 ms capped a
+  /// game's sender below its rate; a fixed 0.4 ms let one burst take a block's
+  /// tail and its parity.
+  constexpr std::chrono::microseconds PACING_WINDOW {15000};
+  /// Spacing limits: the minimum caps the send rate at 2,500 packets per second
+  /// (~16 Mbit/s of packed MAT); the maximum keeps one-chunk AC-3 frames prompt.
+  constexpr std::chrono::microseconds MIN_PACKET_SPACING {400};
+  constexpr std::chrono::microseconds MAX_PACKET_SPACING {2500};
 
   /// How far the paced send schedule may run behind before it is reset. The
   /// sender catches up on that much (back to back) after a late wake-up.
@@ -131,6 +137,18 @@ namespace audio_bitstream::protocol {
       return std::nullopt;
     }
     return h;
+  }
+
+  /**
+   * @brief Spacing for the packets of a frame cut into chunk_count chunks.
+   *
+   * The frame's data packets plus their FEC parity (two per four, so half again)
+   * spread evenly over PACING_WINDOW, within [MIN_PACKET_SPACING, MAX_PACKET_SPACING].
+   */
+  inline std::chrono::microseconds packet_spacing(std::size_t chunk_count) {
+    const std::size_t packets = chunk_count + (chunk_count + 1) / 2;
+    if (packets == 0) return MAX_PACKET_SPACING;
+    return std::clamp(PACING_WINDOW / static_cast<std::int64_t>(packets), MIN_PACKET_SPACING, MAX_PACKET_SPACING);
   }
 
   /**
