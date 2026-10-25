@@ -49,6 +49,22 @@ namespace platf::audio::atmos_tap {
     template<class T>
     using com_ptr = std::unique_ptr<T, com_releaser>;
 
+    // Polls run every 2 ms, which a game saturating the CPU delays at normal
+    // thread priorities. MMCSS "Pro Audio" keeps them on time, as for WASAPI
+    // capture; avrt.dll is loaded here so this file links without it (tests).
+    void join_pro_audio_mmcss() {
+      using set_characteristics_t = HANDLE(WINAPI *)(LPCWSTR, LPDWORD);
+      if (HMODULE avrt = LoadLibraryExW(L"avrt.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32)) {
+        auto set_characteristics = reinterpret_cast<set_characteristics_t>(
+          reinterpret_cast<void *>(GetProcAddress(avrt, "AvSetMmThreadCharacteristicsW")));
+        DWORD task_index = 0;
+        if (set_characteristics && set_characteristics(L"Pro Audio", &task_index)) {
+          return;  // avrt.dll stays loaded for the thread's MMCSS association
+        }
+      }
+      SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+    }
+
     // endpoint_name is ASCII, so a per-character compare is exact.
     bool is_endpoint_name(const wchar_t *value) {
       if (!value) return false;
@@ -104,7 +120,7 @@ namespace platf::audio::atmos_tap {
     };
 
     void run(callbacks_t callbacks) {
-      SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+      join_pro_audio_mmcss();
       unique_handle timer {CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS)};
 
       sink_t sink {std::move(callbacks)};

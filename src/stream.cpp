@@ -2846,7 +2846,9 @@ namespace stream {
 
     // Audio traffic is sent on this thread
     platf::set_thread_name("stream::audioBroadcast");
-    platf::adjust_thread_priority(platf::thread_priority_e::high);
+    // Bitstream passthrough needs ~315 paced sends a second; a game saturating
+    // the CPU delayed this thread's wake-ups by tens of milliseconds at "high".
+    platf::adjust_thread_priority(platf::thread_priority_e::realtime_audio);
 
     while (auto packet = packets->pop()) {
       if (shutdown_event->peek()) {

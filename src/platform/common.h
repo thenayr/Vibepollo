@@ -796,7 +796,8 @@ namespace platf {
     low,  ///< Low priority
     normal,  ///< Normal priority
     high,  ///< High priority
-    critical  ///< Critical priority
+    critical,  ///< Critical priority
+    realtime_audio  ///< Time-critical audio: MMCSS "Pro Audio" on Windows, critical elsewhere
   };
   void adjust_thread_priority(thread_priority_e priority);
 

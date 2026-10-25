@@ -583,6 +583,7 @@ namespace platf {
         linux_nice = -10;
         break;
       case critical:
+      case realtime_audio:
         linux_nice = -15;
         break;
       default:

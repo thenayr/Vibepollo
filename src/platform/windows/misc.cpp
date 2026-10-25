@@ -41,6 +41,7 @@
 #include <wlanapi.h>
 #include <WS2tcpip.h>
 #include <WtsApi32.h>
+#include <avrt.h>
 #include <sddl.h>
 #include <wrl/client.h>
 // clang-format on
@@ -1536,6 +1537,19 @@ namespace platf {
         win32_priority = THREAD_PRIORITY_ABOVE_NORMAL;
         break;
       case thread_priority_e::critical:
+        win32_priority = THREAD_PRIORITY_HIGHEST;
+        break;
+      case thread_priority_e::realtime_audio:
+        {
+          // MMCSS boosts the thread so it wakes on time even when a game keeps
+          // every core busy, as it does for WASAPI capture. The association
+          // ends with the thread.
+          DWORD task_index = 0;
+          if (AvSetMmThreadCharacteristicsW(L"Pro Audio", &task_index)) {
+            return;
+          }
+          BOOST_LOG(warning) << "Couldn't join the Pro Audio MMCSS task: "sv << GetLastError();
+        }
         win32_priority = THREAD_PRIORITY_HIGHEST;
         break;
       default:

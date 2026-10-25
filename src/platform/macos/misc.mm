@@ -285,6 +285,7 @@ namespace platf {
         mac_priority = QOS_CLASS_USER_INITIATED;
         break;
       case thread_priority_e::critical:
+      case thread_priority_e::realtime_audio:
         mac_priority = QOS_CLASS_USER_INTERACTIVE;
         break;
       default:
