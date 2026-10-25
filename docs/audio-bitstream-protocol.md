@@ -34,7 +34,7 @@ usual surround attributes so the Opus fallback works.
 When passthrough is on, the host makes the probe the default output for the session
 and restores the previous default afterwards, as it does for its virtual sink. It
 doesn't change the probe's format. If the tap doesn't exist yet, it retries every
-250 ms until audio reaches the probe or the session ends. It reserves 3000 kbit/s
+250 ms until audio reaches the probe or the session ends. It reserves 6000 kbit/s
 of the video bitrate for audio instead of the Opus estimate.
 
 ## RTP
@@ -46,7 +46,7 @@ Passthrough uses the normal audio socket, encryption (`SS_ENC_AUDIO`, AES-CBC) a
   FEC packets keep type 127 with `100` in their FEC header's payload type.
 - Every payload is exactly **1200 bytes** before encryption (`CHUNK_BYTES`), so FEC
   shards are equal-sized. With RTP and AES-CBC padding a datagram is 1228 bytes.
-- The host sends passthrough packets, parity included, at least 1.5 ms apart
+- The host sends passthrough packets, parity included, at least 0.4 ms apart
   (`PACKET_SPACING`). Sent back to back, a frame's chunks and their parity
   tend to be lost together when they meet a video burst, leaving FEC nothing to
   recover from.

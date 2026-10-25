@@ -49,16 +49,18 @@ namespace audio_bitstream::protocol {
   constexpr std::uint32_t MAX_FRAME_BYTES = 1u << 19;
 
   /// Video bitrate the host sets aside for passthrough audio payload (FEC parity
-  /// adds half again on the wire). Measured MAT: 1.7-2.0 Mbit/s packed, about
-  /// 2.0 Mbit/s once cut into chunks, at roughly 210 packets per second.
-  constexpr int BITRATE_BUDGET_KBPS = 3000;
+  /// adds half again on the wire). Measured MAT packs to about 2.0 Mbit/s for
+  /// sparse audio (YouTube, ~5 chunks per 20 ms frame) and 5.4 Mbit/s for a game
+  /// in Atmos (~12 chunks per frame, ~900 packets per second with parity).
+  constexpr int BITRATE_BUDGET_KBPS = 6000;
 
   /// Least time between two passthrough packets (data or FEC parity) on the wire.
   /// A frame's chunks and the block's parity would otherwise leave back to back,
   /// and a burst that collides with video loses its tail together with the parity
-  /// meant to repair it. A 20 ms MAT frame is 4-5 chunks plus 2-3 parity packets,
-  /// so this spreads it over about 10 ms of the 20.
-  constexpr std::chrono::microseconds PACKET_SPACING {1500};
+  /// meant to repair it. The cap this sets, 2,500 packets per second, is enough
+  /// for ~16 Mbit/s of packed MAT; a game frame spreads over about 7 ms of its 20.
+  /// (1.5 ms capped the sender below what a game needs and overflowed its queue.)
+  constexpr std::chrono::microseconds PACKET_SPACING {400};
 
   /// How far the paced send schedule may run behind before it is reset. The
   /// sender catches up on that much (back to back) after a late wake-up.
