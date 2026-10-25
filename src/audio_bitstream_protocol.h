@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -51,6 +52,13 @@ namespace audio_bitstream::protocol {
   /// adds half again on the wire). Measured MAT: 1.7-2.0 Mbit/s packed, about
   /// 2.0 Mbit/s once cut into chunks, at roughly 210 packets per second.
   constexpr int BITRATE_BUDGET_KBPS = 3000;
+
+  /// Least time between two passthrough packets (data or FEC parity) on the wire.
+  /// A frame's chunks and the block's parity would otherwise leave back to back,
+  /// and a burst that collides with video loses its tail together with the parity
+  /// meant to repair it. A 20 ms MAT frame is 4-5 chunks plus 2-3 parity packets,
+  /// so this spreads it over about 10 ms of the 20.
+  constexpr std::chrono::microseconds PACKET_SPACING {1500};
 
   /**
    * Chunk header, little-endian:
