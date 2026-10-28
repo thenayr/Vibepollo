@@ -34,7 +34,7 @@ usual surround attributes so the Opus fallback works.
 When passthrough is on, the host makes the probe the default output for the session
 and restores the previous default afterwards, as it does for its virtual sink. It
 doesn't change the probe's format. If the tap doesn't exist yet, it retries every
-250 ms until audio reaches the probe or the session ends. It reserves 6000 kbit/s
+250 ms until audio reaches the probe or the session ends. It reserves 15000 kbit/s
 of the video bitrate for audio instead of the Opus estimate.
 
 ## RTP
@@ -47,10 +47,15 @@ Passthrough uses the normal audio socket, encryption (`SS_ENC_AUDIO`, AES-CBC) a
 - Every payload is exactly **1200 bytes** before encryption (`CHUNK_BYTES`), so FEC
   shards are equal-sized. With RTP and AES-CBC padding a datagram is 1228 bytes.
 - The host paces passthrough packets, parity included: each frame's packets are
-  spread evenly over 15 ms (`PACING_WINDOW`), 0.4-2.5 ms apart depending on the
+  spread evenly over 15 ms (`PACING_WINDOW`), 0.3-2.5 ms apart depending on the
   frame's size (`packet_spacing()`). Sent back to back, a frame's chunks and
   their parity tend to be lost together when they meet a video burst, leaving FEC
   nothing to recover from.
+- Each data packet is sent **twice**, the copy 12 ms after the original
+  (`DUPLICATE_DELAY`), so a video burst that drops several consecutive packets,
+  parity included, rarely takes both copies. Clients must drop duplicates (the
+  RTP audio queue does) and should wait about 30 ms for copies before giving up
+  on a FEC block (moonlight-common-c `RTPQ_BITSTREAM_WAIT_TIME_MS`).
 - RTP timestamps advance by the negotiated packet duration per packet, as for Opus.
   They carry no timing for passthrough.
 - The host sends nothing while the probe has no stream, or while it receives PCM

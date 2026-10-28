@@ -12,6 +12,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <fstream>
 #include <future>
 #include <limits>
@@ -2846,15 +2847,64 @@ namespace stream {
       next_bitstream_send += bitstream_spacing;
     };
 
+    // Every bitstream data packet is sent again DUPLICATE_DELAY later, after the
+    // video burst that may have dropped the first copy has passed (see
+    // audio_bitstream_protocol.h). Copies keep their own address data so they
+    // outlive the packet's session.
+    struct duplicate_t {
+      std::chrono::steady_clock::time_point due;
+      std::vector<char> header;
+      std::vector<char> payload;
+      boost::asio::ip::address target_address;
+      uint16_t target_port;
+      boost::asio::ip::address source_address;
+    };
+    std::deque<duplicate_t> duplicates;
+    auto send_due_duplicates = [&]() {
+      while (!duplicates.empty() && duplicates.front().due <= std::chrono::steady_clock::now()) {
+        auto &copy = duplicates.front();
+        auto send_info = platf::send_info_t {
+          copy.header.data(),
+          copy.header.size(),
+          copy.payload.data(),
+          copy.payload.size(),
+          (uintptr_t) sock.native_handle(),
+          copy.target_address,
+          copy.target_port,
+          copy.source_address,
+        };
+        pace_bitstream_send();
+        try {
+          platf::send(send_info);
+        } catch (const std::exception &e) {
+          BOOST_LOG(error) << "Broadcast audio failed "sv << e.what();
+        }
+        duplicates.pop_front();
+      }
+    };
+
     // Audio traffic is sent on this thread
     platf::set_thread_name("stream::audioBroadcast");
-    // Bitstream passthrough needs up to ~900 paced sends a second; a game saturating
+    // Bitstream passthrough needs up to ~1,700 paced sends a second; a game saturating
     // the CPU delayed this thread's wake-ups by tens of milliseconds at "high".
     platf::adjust_thread_priority(platf::thread_priority_e::realtime_audio);
 
-    while (auto packet = packets->pop()) {
+    while (true) {
+      send_due_duplicates();
+      // With copies pending, wake up when the next one is due.
+      auto packet = duplicates.empty() ?
+                      packets->pop() :
+                      packets->pop(std::max<std::chrono::steady_clock::duration>(
+                        duplicates.front().due - std::chrono::steady_clock::now(),
+                        std::chrono::steady_clock::duration::zero()));
       if (shutdown_event->peek()) {
         break;
+      }
+      if (!packet) {
+        if (!packets->running()) {
+          break;
+        }
+        continue;
       }
 
       TUPLE_2D_REF(channel_data, packet_data, *packet);
@@ -2910,6 +2960,22 @@ namespace stream {
           pace_bitstream_send();
         }
         platf::send(send_info);
+        if (bitstream) {
+          const auto *header = reinterpret_cast<const char *>(&audio_packet);
+          const auto *payload = reinterpret_cast<const char *>(shards_p[sequenceNumber % RTPA_DATA_SHARDS]);
+          duplicates.push_back({
+            std::chrono::steady_clock::now() + audio_bitstream::protocol::DUPLICATE_DELAY,
+            std::vector<char>(header, header + sizeof(audio_packet)),
+            std::vector<char>(payload, payload + bytes),
+            peer_address,
+            session->audio.peer.port(),
+            session->localAddress,
+          });
+          // Bounded in case the sender stalls: old copies are useless anyway.
+          if (duplicates.size() > 512) {
+            duplicates.pop_front();
+          }
+        }
 
         auto &fec_packet = session->audio.fec_packet;
         // initialize the FEC header at the beginning of the FEC block

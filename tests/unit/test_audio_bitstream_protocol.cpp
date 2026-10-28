@@ -157,16 +157,16 @@ TEST(AudioBitstreamProtocol, InconsistentChunkOfTheCurrentFrameIsRejected) {
 // reassemble, unpack. Set VIBEPOLLO_MAT_TAP_WAV to a tap_<n>.wav; skipped otherwise.
 TEST(AudioBitstreamProtocol, PacingSpreadsEachFrameOverTheWindow) {
   using namespace std::chrono_literals;
-  // YouTube-like frame: 5 chunks + 3 parity over 15 ms.
-  EXPECT_EQ(packet_spacing(5), 1875us);
-  // A game in Atmos: 13 chunks + 7 parity.
-  EXPECT_EQ(packet_spacing(13), 750us);
+  // YouTube-like frame: 5 chunks, 5 duplicates and 3 parity over 15 ms.
+  EXPECT_EQ(packet_spacing(5), 1153us);
+  // A game in Atmos: 13 chunks, 13 duplicates and 7 parity.
+  EXPECT_EQ(packet_spacing(13), 454us);
   // One-chunk AC-3 frames and a huge frame hit the limits.
   EXPECT_EQ(packet_spacing(1), MAX_PACKET_SPACING);
   EXPECT_EQ(packet_spacing(60), MIN_PACKET_SPACING);
   // The rate the spacing allows always covers the frame's packets in its 20 ms.
   for (std::size_t chunks = 1; chunks <= 24; ++chunks) {
-    const auto packets = chunks + (chunks + 1) / 2;
+    const auto packets = 2 * chunks + (chunks + 1) / 2;
     EXPECT_LE(packet_spacing(chunks) * packets, 20ms) << chunks << " chunks";
   }
 }
